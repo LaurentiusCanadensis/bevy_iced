@@ -1,9 +1,4 @@
-// Largely taken from https://github.com/iced-rs/iced/blob/0.10/src/lib.rs
-
-use iced_widget::renderer;
-use iced_widget::style;
-
-pub use style::theme;
+// Largely taken from https://github.com/iced-rs/iced/blob/0.13/src/lib.rs
 
 pub use iced_core::alignment;
 pub use iced_core::border;
@@ -13,7 +8,6 @@ pub use iced_core::{
     color, Alignment, Background, Border, Color, ContentFit, Degrees, Gradient, Length, Padding,
     Pixels, Point, Radians, Rectangle, Size, Vector,
 };
-pub use iced_runtime::Command;
 
 pub mod clipboard {
     //! Access the clipboard.
@@ -40,11 +34,7 @@ pub mod overlay {
     //! Display interactive elements on top of other widgets.
 
     /// A generic [`Overlay`].
-    ///
-    /// This is an alias of an `iced_native` element with a default `Renderer`.
-    ///
-    /// [`Overlay`]: iced_native::Overlay
-    pub type Element<'a, Message, Theme = super::theme::Theme, Renderer = crate::Renderer> =
+    pub type Element<'a, Message, Theme = iced_core::Theme, Renderer = crate::Renderer> =
         iced_core::overlay::Element<'a, Message, Theme, Renderer>;
 
     pub use iced_widget::overlay::*;
@@ -71,16 +61,13 @@ pub mod widget {
 
 pub use event::Event;
 pub use font::Font;
-pub use theme::Theme;
+pub use iced_core::Theme;
 
 /// The default renderer.
-pub type Renderer = renderer::Renderer;
+pub type Renderer = crate::Renderer;
 
 /// A generic widget.
-///
-/// This is an alias of an `iced_native` element with a default `Renderer`.
-pub type Element<'a, Message, Theme = theme::Theme, Renderer = crate::Renderer> =
+pub type Element<'a, Message, Theme = iced_core::Theme, Renderer = crate::Renderer> =
     iced_core::Element<'a, Message, Theme, Renderer>;
 
 pub use iced_core::renderer::Style;
-pub use iced_wgpu::Settings;

@@ -1,5 +1,6 @@
 use bevy::{
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
+    ecs::message::MessageReader,
     input::mouse::{MouseButtonInput, MouseWheel},
     prelude::*,
 };
@@ -11,7 +12,7 @@ use bevy_iced::iced::{
 use bevy_iced::{IcedContext, IcedPlugin, IcedSettings};
 use rand::random as rng;
 
-#[derive(Clone, Event)]
+#[derive(Clone, Message)]
 enum UiMessage {
     BoxRequested,
     Scale(f32),
@@ -38,10 +39,10 @@ pub fn main() {
         }))
         .add_plugins((
             IcedPlugin::default(),
-            FrameTimeDiagnosticsPlugin,
+            FrameTimeDiagnosticsPlugin::default(),
             LogDiagnosticsPlugin::default(),
         ))
-        .add_event::<UiMessage>()
+        .add_message::<UiMessage>()
         .insert_resource(UiActive(true))
         .insert_resource(UiData {
             scale: 50.0,
@@ -63,19 +64,19 @@ pub fn main() {
 }
 
 fn build_program(mut commands: Commands) {
-    commands.spawn(Camera2dBundle::default());
+    commands.spawn(Camera2d);
 }
 
 fn tick(mut sprites: Query<&mut Sprite>, time: Res<Time>, data: Res<UiData>) {
     let scale = data.scale;
     for mut s in sprites.iter_mut() {
-        s.custom_size = Some(Vec2::new(scale, scale) * time.elapsed_seconds().sin().abs());
+        s.custom_size = Some(Vec2::new(scale, scale) * time.elapsed_secs().sin().abs());
     }
 }
 
 fn box_system(
     mut commands: Commands,
-    mut messages: EventReader<UiMessage>,
+    mut messages: MessageReader<UiMessage>,
     mut data: ResMut<UiData>,
     mut sprites: Query<&mut Sprite>,
 ) {
@@ -83,15 +84,14 @@ fn box_system(
     for msg in messages.read() {
         match msg {
             UiMessage::BoxRequested => {
-                commands.spawn(SpriteBundle {
-                    sprite: Sprite {
-                        color: Color::rgba_u8(rng(), rng(), rng(), rng()),
+                commands.spawn((
+                    Sprite {
+                        color: Color::srgba_u8(rng(), rng(), rng(), rng()),
                         custom_size: Some(Vec2::new(50.0, 50.0)),
                         ..Default::default()
                     },
-                    transform: Transform::from_translation(pos),
-                    ..Default::default()
-                });
+                    Transform::from_translation(pos),
+                ));
             }
             UiMessage::Scale(new_scale) => {
                 data.scale = *new_scale;
@@ -99,7 +99,7 @@ fn box_system(
             UiMessage::Text(s) => {
                 data.text.clone_from(s);
                 for mut i in &mut sprites.iter_mut() {
-                    i.color = Color::rgba_u8(rng(), rng(), rng(), rng());
+                    i.color = Color::srgba_u8(rng(), rng(), rng(), rng());
                 }
             }
         }
@@ -107,7 +107,7 @@ fn box_system(
 }
 
 fn update_scale_factor(
-    mut wheel: EventReader<MouseWheel>,
+    mut wheel: MessageReader<MouseWheel>,
     mut iced_settings: ResMut<IcedSettings>,
 ) {
     if wheel.is_empty() {
@@ -120,7 +120,7 @@ fn update_scale_factor(
     }
 }
 
-fn toggle_ui(mut buttons: EventReader<MouseButtonInput>, mut ui_active: ResMut<UiActive>) {
+fn toggle_ui(mut buttons: MessageReader<MouseButtonInput>, mut ui_active: ResMut<UiActive>) {
     for ev in buttons.read() {
         if ev.button == MouseButton::Right {
             **ui_active = !**ui_active;
@@ -140,7 +140,7 @@ fn ui_system(
 
     let row = Row::new()
         .spacing(10)
-        .align_items(Alignment::Center)
+        .align_y(Alignment::Center)
         .push(Button::new(text("Request box")).on_press(UiMessage::BoxRequested))
         .push(text(format!(
             "{} boxes (amplitude: {})",
@@ -149,7 +149,7 @@ fn ui_system(
         )));
     let edit = text_input("", &data.text).on_input(UiMessage::Text);
     let column = Column::new()
-        .align_items(Alignment::Center)
+        .align_x(Alignment::Center)
         .spacing(10)
         .push(edit)
         .push(slider(0.0..=100.0, data.scale, UiMessage::Scale))

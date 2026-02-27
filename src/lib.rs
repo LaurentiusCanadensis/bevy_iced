@@ -20,17 +20,15 @@
 //! fn ui_system(time: Res<Time>, mut ctx: IcedContext<UiMessage>) {
 //!     ctx.display(text(format!(
 //!         "Hello Iced! Running for {:.2} seconds.",
-//!         time.elapsed_seconds()
+//!         time.elapsed_secs()
 //!     )));
 //! }
 //! ```
 
-#![deny(unsafe_code)]
 #![deny(missing_docs)]
 
 use std::any::{Any, TypeId};
-
-use std::borrow::Cow;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -38,19 +36,18 @@ use crate::render::{extract_iced_data, IcedNode, ViewportResource};
 
 use bevy_app::{App, Plugin, Update};
 use bevy_derive::{Deref, DerefMut};
-use bevy_ecs::prelude::{EventWriter, Query, With};
-use bevy_ecs::system::{NonSendMut, Res, ResMut, Resource, SystemParam};
+use bevy_ecs::prelude::{Query, With};
+use bevy_ecs::message::MessageWriter;
+use bevy_ecs::resource::Resource;
+use bevy_ecs::system::{NonSendMut, Res, ResMut, SystemParam};
 use bevy_input::touch::Touches;
 use bevy_render::render_graph::RenderGraph;
-use bevy_render::renderer::{RenderDevice, RenderQueue};
+use bevy_render::renderer::{RenderAdapter, RenderDevice, RenderQueue};
 use bevy_render::{ExtractSchedule, RenderApp};
-use bevy_utils::HashMap;
 use bevy_window::{PrimaryWindow, Window};
 use iced_core::mouse::Cursor;
 use iced_runtime::user_interface::UserInterface;
-use iced_widget::graphics::backend::Text;
-use iced_widget::graphics::Viewport;
-use iced_widget::style::Theme;
+use iced_wgpu::graphics::Viewport;
 
 /// Basic re-exports for all Iced-related stuff.
 ///
@@ -66,17 +63,12 @@ mod utils;
 use systems::IcedEventQueue;
 
 /// The default renderer.
-pub type Renderer = iced_renderer::Renderer;
+pub type Renderer = iced_wgpu::Renderer;
 
 /// The main feature of `bevy_iced`.
 /// Add this to your [`App`] by calling `app.add_plugin(bevy_iced::IcedPlugin::default())`.
 #[derive(Default)]
-pub struct IcedPlugin {
-    /// The settings that Iced should use.
-    pub settings: iced::Settings,
-    /// Font file contents
-    pub fonts: Vec<&'static [u8]>,
-}
+pub struct IcedPlugin;
 
 impl Plugin for IcedPlugin {
     fn build(&self, app: &mut App) {
@@ -90,57 +82,74 @@ impl Plugin for IcedPlugin {
     fn finish(&self, app: &mut App) {
         let default_viewport = Viewport::with_physical_size(iced_core::Size::new(1600, 900), 1.0);
         let default_viewport = ViewportResource(default_viewport);
-        let iced_resource: IcedResource = IcedProps::new(app, self).into();
+        let iced_resource: IcedResource = IcedProps::new(app).into();
 
         app.insert_resource(default_viewport.clone())
-            .insert_resource(iced_resource.clone());
+            .insert_non_send_resource(iced_resource.clone());
 
         let render_app = app.sub_app_mut(RenderApp);
         render_app
             .insert_resource(default_viewport)
-            .insert_resource(iced_resource)
             .add_systems(ExtractSchedule, extract_iced_data);
-        setup_pipeline(&mut render_app.world.get_resource_mut().unwrap());
+        render_app.world_mut().insert_non_send_resource(iced_resource);
+        let mut graph = render_app.world_mut().get_resource_mut::<RenderGraph>().unwrap();
+        setup_pipeline(&mut *graph);
     }
 }
 
-struct IcedProps {
+pub(crate) struct IcedProps {
     renderer: Renderer,
-    debug: iced_runtime::Debug,
     clipboard: iced_core::clipboard::Null,
 }
 
 impl IcedProps {
-    fn new(app: &App, config: &IcedPlugin) -> Self {
-        let render_world = &app.sub_app(RenderApp).world;
-        let device = render_world
-            .get_resource::<RenderDevice>()
-            .unwrap()
-            .wgpu_device();
-        let queue = render_world.get_resource::<RenderQueue>().unwrap();
-        let mut backend =
-            iced_wgpu::Backend::new(device, queue.as_ref(), config.settings, render::TEXTURE_FMT);
-        for font in &config.fonts {
-            backend.load_font(Cow::Borrowed(*font));
-        }
+    fn new(app: &App) -> Self {
+        use std::ops::Deref;
+
+        let render_world = app.sub_app(RenderApp).world();
+        let render_device = render_world.get_resource::<RenderDevice>().unwrap();
+        let render_queue = render_world.get_resource::<RenderQueue>().unwrap();
+        let render_adapter = render_world.get_resource::<RenderAdapter>().unwrap();
+
+        // Clone the wgpu types out of Bevy's wrappers — Engine::new takes owned Device/Queue.
+        // In wgpu 27 Device and Queue are cheaply Clone (internal Arc).
+        let device: iced_wgpu::wgpu::Device = render_device.wgpu_device().clone();
+        let queue: iced_wgpu::wgpu::Queue = render_queue.0.deref().deref().clone();
+        let adapter_ref: &iced_wgpu::wgpu::Adapter = render_adapter.0.deref().deref();
+
+        let engine = iced_wgpu::Engine::new(
+            adapter_ref,
+            device,
+            queue,
+            render::TEXTURE_FMT,
+            None,
+            iced_wgpu::graphics::Shell::headless(),
+        );
+
+        let renderer = iced_wgpu::Renderer::new(
+            engine,
+            iced_core::Font::DEFAULT,
+            iced_core::Pixels(16.0),
+        );
 
         Self {
-            renderer: Renderer::Wgpu(iced_wgpu::Renderer::new(
-                backend,
-                config.settings.default_font,
-                config.settings.default_text_size,
-            )),
-            debug: iced_runtime::Debug::new(),
+            renderer,
             clipboard: iced_core::clipboard::Null,
         }
     }
 }
 
-#[derive(Resource, Clone)]
-struct IcedResource(Arc<Mutex<IcedProps>>);
+// SAFETY: IcedProps is only accessed from the main thread via NonSend resource,
+// or from the render thread behind a Mutex. The Rc's inside Renderer are never
+// shared across threads — access is serialized by the Mutex.
+unsafe impl Send for IcedProps {}
+unsafe impl Sync for IcedProps {}
+
+#[derive(Clone)]
+pub(crate) struct IcedResource(Arc<Mutex<IcedProps>>);
 
 impl IcedResource {
-    fn lock(&self) -> std::sync::LockResult<std::sync::MutexGuard<IcedProps>> {
+    fn lock(&self) -> std::sync::LockResult<std::sync::MutexGuard<'_, IcedProps>> {
         self.0.lock()
     }
 }
@@ -179,9 +188,9 @@ pub struct IcedSettings {
     /// Setting this to `None` defaults to using the `Window`s scale factor.
     pub scale_factor: Option<f64>,
     /// The theme to use for rendering Iced elements.
-    pub theme: iced_widget::style::Theme,
+    pub theme: iced_core::Theme,
     /// The style to use for rendering Iced elements.
-    pub style: iced::Style,
+    pub style: iced_core::renderer::Style,
 }
 
 impl IcedSettings {
@@ -195,8 +204,8 @@ impl Default for IcedSettings {
     fn default() -> Self {
         Self {
             scale_factor: None,
-            theme: iced_widget::style::Theme::Dark,
-            style: iced::Style {
+            theme: iced_core::Theme::Dark,
+            style: iced_core::renderer::Style {
                 text_color: iced_core::Color::WHITE,
             },
         }
@@ -215,26 +224,25 @@ pub(crate) struct DidDraw(std::sync::atomic::AtomicBool);
 /// }
 /// ```
 ///
-/// `IcedContext<T>` requires an event system to be defined in the [`App`].
-/// Do so by invoking `app.add_event::<T>()` when constructing your App.
+/// `IcedContext<T>` requires a message type registered in the [`App`].
 #[derive(SystemParam)]
-pub struct IcedContext<'w, 's, Message: bevy_ecs::event::Event> {
+pub struct IcedContext<'w, 's, Message: bevy_ecs::message::Message> {
     viewport: Res<'w, ViewportResource>,
-    props: Res<'w, IcedResource>,
+    props: NonSendMut<'w, IcedResource>,
     settings: Res<'w, IcedSettings>,
     windows: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
     events: ResMut<'w, IcedEventQueue>,
     cache_map: NonSendMut<'w, IcedCache>,
-    messages: EventWriter<'w, Message>,
+    messages: MessageWriter<'w, Message>,
     did_draw: ResMut<'w, DidDraw>,
     touches: Res<'w, Touches>,
 }
 
-impl<'w, 's, M: bevy_ecs::event::Event> IcedContext<'w, 's, M> {
+impl<'w, 's, M: bevy_ecs::message::Message> IcedContext<'w, 's, M> {
     /// Display an [`Element`] to the screen.
     pub fn display<'a>(
         &'a mut self,
-        element: impl Into<iced_core::Element<'a, M, Theme, Renderer>>,
+        element: impl Into<iced_core::Element<'a, M, iced_core::Theme, Renderer>>,
     ) {
         let IcedProps {
             ref mut renderer,
@@ -246,7 +254,7 @@ impl<'w, 's, M: bevy_ecs::event::Event> IcedContext<'w, 's, M> {
         let element = element.into();
 
         let cursor = {
-            let window = self.windows.single();
+            let window = self.windows.single().unwrap();
             match window.cursor_position() {
                 Some(position) => {
                     Cursor::Available(utils::process_cursor_position(position, bounds, window))
@@ -262,7 +270,7 @@ impl<'w, 's, M: bevy_ecs::event::Event> IcedContext<'w, 's, M> {
         let cache = cache_entry.take().unwrap();
         let mut ui = UserInterface::build(element, bounds, cache, renderer);
         let (_, _event_statuses) = ui.update(
-            self.events.as_slice(),
+            self.events.0.as_slice(),
             cursor,
             renderer,
             clipboard,
@@ -270,14 +278,14 @@ impl<'w, 's, M: bevy_ecs::event::Event> IcedContext<'w, 's, M> {
         );
 
         messages.into_iter().for_each(|msg| {
-            self.messages.send(msg);
+            self.messages.write(msg);
         });
 
         ui.draw(renderer, &self.settings.theme, &self.settings.style, cursor);
 
-        self.events.clear();
+        self.events.0.clear();
         *cache_entry = Some(ui.into_cache());
-        self.did_draw
+        self.did_draw.0
             .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }

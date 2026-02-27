@@ -1,10 +1,11 @@
 use bevy::prelude::*;
+use bevy_ecs::message::MessageReader;
 use bevy_iced::iced::widget::text;
 use bevy_iced::{IcedContext, IcedPlugin};
 use bevy_input::keyboard::KeyboardInput;
 use bevy_input::ButtonState;
 
-#[derive(Event)]
+#[derive(Message)]
 pub enum UiMessage {}
 
 #[derive(Resource, PartialEq, Eq)]
@@ -14,14 +15,17 @@ pub fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(IcedPlugin::default())
-        .add_event::<UiMessage>()
+        .add_message::<UiMessage>()
         .insert_resource(UiActive(true))
         .add_systems(Update, toggle_system)
-        .add_systems(Update, ui_system.run_if(resource_equals(UiActive(true))))
+        .add_systems(
+            Update,
+            ui_system.run_if(|active: Res<UiActive>| active.0),
+        )
         .run();
 }
 
-fn toggle_system(mut keyboard: EventReader<KeyboardInput>, mut active: ResMut<UiActive>) {
+fn toggle_system(mut keyboard: MessageReader<KeyboardInput>, mut active: ResMut<UiActive>) {
     for event in keyboard.read() {
         if event.key_code == KeyCode::Space && event.state == ButtonState::Pressed {
             active.0 = !active.0;

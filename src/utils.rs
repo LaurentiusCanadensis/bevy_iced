@@ -15,7 +15,7 @@ pub fn process_cursor_position(
 }
 
 /// To correctly process input as last resort events are used
-pub fn process_touch_input<M: bevy_ecs::event::Event>(
+pub fn process_touch_input<M: bevy_ecs::message::Message>(
     context: &IcedContext<M>,
 ) -> Option<iced::Point> {
     context
@@ -32,6 +32,7 @@ pub fn process_touch_input<M: bevy_ecs::event::Event>(
         .or_else(|| {
             context
                 .events
+                .0
                 .iter()
                 .find_map(|ev| {
                     if let iced::Event::Touch(

@@ -2,14 +2,14 @@ use bevy::prelude::*;
 use bevy_iced::iced::widget::text;
 use bevy_iced::{IcedContext, IcedPlugin};
 
-#[derive(Event)]
+#[derive(Message)]
 pub enum UiMessage {}
 
 pub fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(IcedPlugin::default())
-        .add_event::<UiMessage>()
+        .add_message::<UiMessage>()
         .add_systems(Update, ui_system)
         .run();
 }
@@ -17,6 +17,6 @@ pub fn main() {
 fn ui_system(time: Res<Time>, mut ctx: IcedContext<UiMessage>) {
     ctx.display(text(format!(
         "Hello Iced! Running for {:.2} seconds.",
-        time.elapsed_seconds()
+        time.elapsed_secs()
     )));
 }

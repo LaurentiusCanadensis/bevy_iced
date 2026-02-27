@@ -1,9 +1,10 @@
 use crate::conversions;
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
-    prelude::EventReader,
-    system::{Res, ResMut, Resource, SystemParam},
+    message::MessageReader,
+    system::{Res, ResMut, SystemParam},
 };
+use bevy_ecs::resource::Resource;
 use bevy_input::keyboard::KeyCode;
 use bevy_input::touch::TouchInput;
 use bevy_input::{
@@ -11,23 +12,21 @@ use bevy_input::{
     mouse::{MouseButtonInput, MouseWheel},
     ButtonInput, ButtonState,
 };
-use bevy_window::{CursorEntered, CursorLeft, CursorMoved, ReceivedCharacter};
-use iced_core::SmolStr;
+use bevy_window::{CursorEntered, CursorLeft, CursorMoved};
 use iced_core::{keyboard, mouse, Event as IcedEvent, Point};
 
 #[derive(Resource, Deref, DerefMut, Default)]
-pub struct IcedEventQueue(Vec<iced_core::Event>);
+pub struct IcedEventQueue(pub Vec<iced_core::Event>);
 
 #[derive(SystemParam)]
 pub struct InputEvents<'w, 's> {
-    cursor_entered: EventReader<'w, 's, CursorEntered>,
-    cursor_left: EventReader<'w, 's, CursorLeft>,
-    cursor: EventReader<'w, 's, CursorMoved>,
-    mouse_button: EventReader<'w, 's, MouseButtonInput>,
-    mouse_wheel: EventReader<'w, 's, MouseWheel>,
-    received_character: EventReader<'w, 's, ReceivedCharacter>,
-    keyboard_input: EventReader<'w, 's, KeyboardInput>,
-    touch_input: EventReader<'w, 's, TouchInput>,
+    cursor_entered: MessageReader<'w, 's, CursorEntered>,
+    cursor_left: MessageReader<'w, 's, CursorLeft>,
+    cursor: MessageReader<'w, 's, CursorMoved>,
+    mouse_button: MessageReader<'w, 's, MouseButtonInput>,
+    mouse_wheel: MessageReader<'w, 's, MouseWheel>,
+    keyboard_input: MessageReader<'w, 's, KeyboardInput>,
+    touch_input: MessageReader<'w, 's, TouchInput>,
 }
 
 fn compute_modifiers(input_map: &ButtonInput<KeyCode>) -> keyboard::Modifiers {
@@ -52,51 +51,37 @@ pub fn process_input(
     mut event_queue: ResMut<IcedEventQueue>,
     input_map: Res<ButtonInput<KeyCode>>,
 ) {
-    event_queue.clear();
+    event_queue.0.clear();
 
     for ev in events.cursor.read() {
-        event_queue.push(IcedEvent::Mouse(mouse::Event::CursorMoved {
+        event_queue.0.push(IcedEvent::Mouse(mouse::Event::CursorMoved {
             position: Point::new(ev.position.x, ev.position.y),
         }));
     }
 
     for ev in events.mouse_button.read() {
         let button = conversions::mouse_button(ev.button);
-        event_queue.push(IcedEvent::Mouse(match ev.state {
+        event_queue.0.push(IcedEvent::Mouse(match ev.state {
             ButtonState::Pressed => iced_core::mouse::Event::ButtonPressed(button),
             ButtonState::Released => iced_core::mouse::Event::ButtonReleased(button),
         }));
     }
 
     for _ev in events.cursor_entered.read() {
-        event_queue.push(IcedEvent::Mouse(iced_core::mouse::Event::CursorEntered));
+        event_queue.0.push(IcedEvent::Mouse(iced_core::mouse::Event::CursorEntered));
     }
 
     for _ev in events.cursor_left.read() {
-        event_queue.push(IcedEvent::Mouse(iced_core::mouse::Event::CursorLeft));
+        event_queue.0.push(IcedEvent::Mouse(iced_core::mouse::Event::CursorLeft));
     }
 
     for ev in events.mouse_wheel.read() {
-        event_queue.push(IcedEvent::Mouse(iced_core::mouse::Event::WheelScrolled {
+        event_queue.0.push(IcedEvent::Mouse(iced_core::mouse::Event::WheelScrolled {
             delta: mouse::ScrollDelta::Pixels { x: ev.x, y: ev.y },
         }));
     }
 
     let modifiers = compute_modifiers(&input_map);
-
-    for ev in events.received_character.read() {
-        for char in ev.char.chars() {
-            let smol_str = SmolStr::new(char.to_string());
-            let event = keyboard::Event::KeyPressed {
-                key: keyboard::Key::Character(smol_str.clone()),
-                modifiers,
-                // NOTE: This is a winit thing we don't get from bevy events
-                location: keyboard::Location::Standard,
-                text: Some(smol_str),
-            };
-            event_queue.push(IcedEvent::Keyboard(event));
-        }
-    }
 
     for ev in events.keyboard_input.read() {
         use keyboard::Event::*;
@@ -113,27 +98,34 @@ pub fn process_input(
                 let key = conversions::key_code(&ev.logical_key);
                 if ev.state.is_pressed() {
                     KeyPressed {
-                        key,
+                        key: key.clone(),
+                        modified_key: key,
+                        physical_key: keyboard::key::Physical::Unidentified(
+                            iced_core::keyboard::key::NativeCode::Unidentified,
+                        ),
                         modifiers,
-                        // NOTE: This is a winit thing we don't get from bevy events
                         location: keyboard::Location::Standard,
                         text: None,
+                        repeat: false,
                     }
                 } else {
                     KeyReleased {
-                        key,
+                        key: key.clone(),
+                        modified_key: key,
+                        physical_key: keyboard::key::Physical::Unidentified(
+                            iced_core::keyboard::key::NativeCode::Unidentified,
+                        ),
                         modifiers,
-                        // NOTE: This is a winit thing we don't get from bevy events
                         location: keyboard::Location::Standard,
                     }
                 }
             }
         };
 
-        event_queue.push(IcedEvent::Keyboard(event));
+        event_queue.0.push(IcedEvent::Keyboard(event));
     }
 
     for ev in events.touch_input.read() {
-        event_queue.push(IcedEvent::Touch(conversions::touch_event(ev)));
+        event_queue.0.push(IcedEvent::Touch(conversions::touch_event(ev)));
     }
 }
