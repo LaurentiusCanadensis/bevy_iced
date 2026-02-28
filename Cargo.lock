@@ -813,7 +813,7 @@ dependencies = [
  "bevy_window",
  "iced_core",
  "iced_runtime",
- "iced_wgpu",
+ "iced_wgpu 0.14.0",
  "iced_widget",
  "rand 0.8.5",
 ]
@@ -2950,7 +2950,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "250cc0802408e8c077986ec56c7d07c65f423ee658a4b9fd795a1f2aae5dac05"
 dependencies = [
  "iced_graphics",
- "iced_wgpu",
+ "iced_wgpu 0.14.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "log",
  "thiserror 2.0.18",
 ]
@@ -2966,6 +2966,24 @@ dependencies = [
  "iced_futures",
  "raw-window-handle",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "iced_wgpu"
+version = "0.14.0"
+dependencies = [
+ "bitflags 2.11.0",
+ "bytemuck",
+ "cryoglyph",
+ "futures",
+ "glam 0.25.0",
+ "guillotiere",
+ "iced_debug",
+ "iced_graphics",
+ "log",
+ "rustc-hash 2.1.1",
+ "thiserror 2.0.18",
+ "wgpu",
 ]
 
 [[package]]

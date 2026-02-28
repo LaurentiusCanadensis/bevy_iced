@@ -33,6 +33,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use crate::render::{extract_iced_data, IcedNode, ViewportResource};
+pub use crate::render::IcedClearColor;
 
 use bevy_app::{App, Plugin, Update};
 use bevy_derive::{Deref, DerefMut};
@@ -85,13 +86,13 @@ impl Plugin for IcedPlugin {
         let iced_resource: IcedResource = IcedProps::new(app).into();
 
         app.insert_resource(default_viewport.clone())
-            .insert_non_send_resource(iced_resource.clone());
+            .insert_resource(iced_resource.clone());
 
         let render_app = app.sub_app_mut(RenderApp);
         render_app
             .insert_resource(default_viewport)
             .add_systems(ExtractSchedule, extract_iced_data);
-        render_app.world_mut().insert_non_send_resource(iced_resource);
+        render_app.world_mut().insert_resource(iced_resource);
         let mut graph = render_app.world_mut().get_resource_mut::<RenderGraph>().unwrap();
         setup_pipeline(&mut *graph);
     }
@@ -139,13 +140,13 @@ impl IcedProps {
     }
 }
 
-// SAFETY: IcedProps is only accessed from the main thread via NonSend resource,
-// or from the render thread behind a Mutex. The Rc's inside Renderer are never
-// shared across threads — access is serialized by the Mutex.
+// SAFETY: IcedProps is accessed from both the main thread and the render thread
+// behind an Arc<Mutex>. The Rc's inside Renderer are never shared across threads
+// — access is serialized by the Mutex.
 unsafe impl Send for IcedProps {}
 unsafe impl Sync for IcedProps {}
 
-#[derive(Clone)]
+#[derive(Clone, Resource)]
 pub(crate) struct IcedResource(Arc<Mutex<IcedProps>>);
 
 impl IcedResource {
@@ -228,7 +229,7 @@ pub(crate) struct DidDraw(std::sync::atomic::AtomicBool);
 #[derive(SystemParam)]
 pub struct IcedContext<'w, 's, Message: bevy_ecs::message::Message> {
     viewport: Res<'w, ViewportResource>,
-    props: NonSendMut<'w, IcedResource>,
+    props: ResMut<'w, IcedResource>,
     settings: Res<'w, IcedSettings>,
     windows: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
     events: ResMut<'w, IcedEventQueue>,

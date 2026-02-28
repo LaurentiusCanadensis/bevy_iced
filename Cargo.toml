@@ -22,7 +22,7 @@ bevy_window = "0.18"
 
 iced_core = "0.14"
 iced_runtime = "0.14"
-iced_wgpu = "0.14"
+iced_wgpu = { path = "iced_wgpu_local" }
 iced_widget = { version = "0.14", features = ["wgpu"] }
 
 [dev-dependencies]

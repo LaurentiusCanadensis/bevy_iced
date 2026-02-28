@@ -30,6 +30,12 @@ pub const TEXTURE_FMT: TextureFormat = TextureFormat::Bgra8UnormSrgb;
 #[derive(Resource, Deref, DerefMut, Clone)]
 pub struct ViewportResource(pub Viewport);
 
+/// Optional clear color for the Iced render pass.
+/// When set, the Iced renderer uses `LoadOp::Clear` with this color.
+/// When absent, it uses `LoadOp::Load` (preserving existing framebuffer content).
+#[derive(Resource, Clone)]
+pub struct IcedClearColor(pub iced_core::Color);
+
 pub fn update_viewport(
     windows: Query<&Window>,
     iced_settings: Res<IcedSettings>,
@@ -54,11 +60,17 @@ pub fn extract_iced_data(
     mut commands: Commands,
     viewport: Extract<Res<ViewportResource>>,
     did_draw: Extract<Res<DidDraw>>,
+    clear_color: Extract<Option<Res<IcedClearColor>>>,
 ) {
     commands.insert_resource(ViewportResource(viewport.0.clone()));
     commands.insert_resource(DidDrawBasic(
         did_draw.0.swap(false, std::sync::atomic::Ordering::Relaxed),
     ));
+    if let Some(cc) = clear_color.as_deref() {
+        commands.insert_resource(cc.clone());
+    } else {
+        commands.remove_resource::<IcedClearColor>();
+    }
 }
 
 pub struct IcedNode;
@@ -75,7 +87,7 @@ impl Node for IcedNode {
     fn run(
         &self,
         _graph: &mut RenderGraphContext,
-        _render_context: &mut RenderContext,
+        render_context: &mut RenderContext,
         world: &World,
     ) -> Result<(), NodeRunError> {
         let Some(extracted_window) = world
@@ -93,12 +105,23 @@ impl Node for IcedNode {
         if !world.get_resource::<DidDrawBasic>().is_some_and(|x| x.0) {
             return Ok(());
         }
-        let view = extracted_window.swap_chain_texture_view.as_ref().unwrap();
 
-        let mut iced_resource = world.get_non_send_resource::<IcedResource>().unwrap().lock().unwrap();
-        iced_resource.renderer.present(
-            None,
-            TEXTURE_FMT,
+        let Some(view) = extracted_window.swap_chain_texture_view.as_ref() else {
+            return Ok(());
+        };
+
+        let clear_color = world
+            .get_resource::<IcedClearColor>()
+            .map(|cc| cc.0);
+
+        let mut iced_resource = world.get_resource::<IcedResource>().unwrap().lock().unwrap();
+
+        // Render directly into Bevy's command encoder so Iced's draw calls
+        // are part of Bevy's submission batch. IcedNode runs after
+        // CameraDriverLabel, so this overwrites camera output.
+        iced_resource.renderer.render_to_encoder(
+            render_context.command_encoder(),
+            clear_color,
             &**view,
             viewport,
         );
